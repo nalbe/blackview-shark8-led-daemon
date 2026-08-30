@@ -1,6 +1,6 @@
 id=led_hal_root
 name=Notification LED daemon (AW2033)
-version=2.7
-versionCode=9
+version=2.8
+versionCode=10
 author=Bastet
 description=Notification LED for Blackview Shark8 on ported Pixel ROM. Stock MTK lights HAL cannot flash on this hardware. A single event-driven daemon (chgd) drives the AW2033 RGB LED via blink/led_time sysfs nodes: it subscribes to the logd events socket (notification_enqueue) and kernel uevents, no polling loops. All colors are RGB (0-255 per channel) and user-tweakable at runtime in led.conf: per-app notification colors, default color, charge range colors and light types (default: lower red breathing <90%, middle lime flashing 90-94%, upper static green >=95%), thresholds, breathing timings, notification blacklist. Notifications take priority over charge indication. keepalive.sh auto-restarts the daemon.

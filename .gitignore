@@ -1,0 +1,14 @@
+# Gradle / Android build output
+.gradle/
+.kotlin/
+led_gui/app/build/
+led_gui/local.properties
+
+# Editor / OS
+.idea/
+*.iml
+Thumbs.db
+.DS_Store
+
+# Local build scratch
+build_out.txt

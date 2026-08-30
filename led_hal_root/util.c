@@ -1,6 +1,7 @@
 /*
- * util.c - logging, sysfs LED primitives, screen detection.
- * Pure device plumbing; no policy here. Shared by the core and mods.
+ * util.c - logging, sysfs read/write helpers, live status file,
+ * screen detection. Pure device plumbing; no policy here. Shared by the
+ * core and mods. All LED-channel writes live in led.c, not here.
  */
 
 #include <stdio.h>
@@ -15,6 +16,18 @@
 
 int g_verbose = 0;
 
+/* Runtime logging switch, driven by [led] logging in led.conf (config.c
+ * calls log_set_enabled() every time the config is (re)loaded). When off,
+ * log_line() becomes a no-op: no file write, no syscalls beyond the
+ * caller's own work. The GUI's ledd.log (tail) card just shows whatever
+ * was written before the switch left. */
+static int g_log_allow = 1;
+
+void log_set_enabled(int on)
+{
+    g_log_allow = on ? 1 : 0;
+}
+
 void log_line(const char *fmt, ...)
 {
     char msg[512];
@@ -27,6 +40,8 @@ void log_line(const char *fmt, ...)
         fprintf(stderr, "%s\n", msg);
         return;
     }
+    conf_maybe_reload();            /* refresh the [led] logging switch cheaply */
+    if (!g_log_allow) return;
     FILE *n = fopen("/data/local/tmp/ledd.log", "a");
     if (!n) return;
     time_t t = time(NULL);
@@ -65,74 +80,28 @@ void write_sys(const char *path, const char *val)
     close(fd);
 }
 
-void led_set(const char *c, int level)
-{
-    char p[128];
-    snprintf(p, sizeof(p), "/sys/class/leds/%s/trigger", c);
-    write_sys(p, "none");
-    snprintf(p, sizeof(p), "/sys/class/leds/%s/brightness", c);
-    char v[8]; snprintf(v, sizeof(v), "%d", level);
-    write_sys(p, v);
-}
+/* ---------------- live status file ---------------- */
 
-/* steady RGB: per-channel brightness only; blink/led_time already cleared
- * by leds_all_off() (stale led_time keeps pulsing otherwise) */
-void led_solid_rgb(int r, int g, int b)
-{
-    static const char *leds[] = { "red", "green", "blue" };
-    int vals[3] = { r, g, b };
-    leds_all_off();
-    for (int i = 0; i < 3; i++) {
-        if (vals[i] <= 0) continue;
-        char p[128], v[8];
-        snprintf(p, sizeof(p), "/sys/class/leds/%s/brightness", leds[i]);
-        snprintf(v, sizeof(v), "%d", vals[i]);
-        write_sys(p, v);
-    }
-}
+#define STATUS_PATH "/data/local/tmp/led_status"
+#define STATUS_TMP  "/data/local/tmp/led_status.tmp"
 
-/* breathing RGB: per-channel brightness is the breath peak, timing from
- * led_time "rise hold fall offt" (ms, quantized by aw2033 driver) */
-void led_breathe_rgb(int r, int g, int b, int rise, int hold, int fall, int offt)
+/* Write the current LED-owner state for external consumers (GUI etc.).
+ * mode: charge | notify | ring
+ * band: lower/middle/upper/none (charge only, "" otherwise)
+ * pkg:  armed notification / ring pseudo-package, "" when none
+ * Atomic tmp + rename, same pattern as charge.c's led_chg. */
+void status_write(const char *mode, const char *band, const char *pkg,
+                  int r, int g, int b, int type)
 {
-    static const char *leds[] = { "red", "green", "blue" };
-    int vals[3] = { r, g, b };
-    leds_all_off();
-    for (int i = 0; i < 3; i++) {
-        if (vals[i] <= 0) continue;
-        char p[128], v[64];
-        led_set(leds[i], vals[i]);
-        snprintf(p, sizeof(p), "/sys/class/leds/%s/led_time", leds[i]);
-        snprintf(v, sizeof(v), "%d %d %d %d", rise, hold, fall, offt);
-        write_sys(p, v);
-        snprintf(p, sizeof(p), "/sys/class/leds/%s/blink", leds[i]);
-        write_sys(p, "1");
-    }
-}
-
-void leds_all_off(void)
-{
-    static const char *leds[] = { "red", "green", "blue" };
-    for (int i = 0; i < 3; i++) {
-        char p[128];
-        snprintf(p, sizeof(p), "/sys/class/leds/%s/blink", leds[i]);
-        write_sys(p, "0");
-        snprintf(p, sizeof(p), "/sys/class/leds/%s/led_time", leds[i]);
-        write_sys(p, "0 0 0 0");
-        led_set(leds[i], 0);
-    }
-}
-
-/* raw per-channel brightness write; used by the rainbow cycler */
-void set_rgb(int r, int g, int b)
-{
-    char v[12];
-    snprintf(v, sizeof(v), "%d", r);
-    write_sys("/sys/class/leds/red/brightness", v);
-    snprintf(v, sizeof(v), "%d", g);
-    write_sys("/sys/class/leds/green/brightness", v);
-    snprintf(v, sizeof(v), "%d", b);
-    write_sys("/sys/class/leds/blue/brightness", v);
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf),
+        "ts=%ld\nmode=%s\nband=%s\npkg=%s\ncolor=%d,%d,%d\ntype=%d\n",
+        (long)time(NULL), mode, band, pkg ? pkg : "", r, g, b, type);
+    int fd = open(STATUS_TMP, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return;
+    ssize_t ig = write(fd, buf, (size_t)len); (void)ig;
+    close(fd);
+    rename(STATUS_TMP, STATUS_PATH);
 }
 
 /* ---------------- screen state ---------------- */

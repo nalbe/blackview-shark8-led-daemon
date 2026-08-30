@@ -1,5 +1,54 @@
 # led_hal_root patch notes (2026-08-23)
 
+## Revision: release v2.8 + LED GUI (2026-08-30)
+1. New companion app: `led_gui/` (Kotlin + Jetpack Compose,
+   `com.bastet.ledgui`). A small root helper that reads the live status
+   file `/data/local/tmp/led_status` (ts / mode / band / pkg / color /
+   type) and lets you edit `/data/adb/modules/led_hal_root/led.conf`
+   (colors, charge bands, suppress blacklist) on the device without adb.
+   Build with gradle (see README); install with install_gui.cmd.
+2. Prebuilt `led-gui.apk` ships in the repo root for direct sideload.
+3. Version bumped to v2.8 / code 10 (daemon unchanged apart from the
+   bump; the modular core is byte-for-byte the v2.7 logic).
+4. install_gui.cmd builds + installs the app; apply.cmd (daemon) rebuilds
+   + pushes the module. Both expect a connected, adb-rooted device.
+
+## Revision: modular source layout v2 (2026-08-29)
+Planned layout applied. The daemon is now split as:
+- core: core.c (event loop, signals, timer policy), led.c (LED hardware
+  primitives + rainbow cycler - the ONLY writer of the RGB channels),
+  config.c (INI runtime config), util.c (log / sysfs helpers / status
+  file / screen detect), tele.c (dumpsys capture), notify.c (event
+  parser + dispatch), charge.c (charge bands)
+- mods (optional): ring.c (call rainbow mode), dialer.c (missed-call
+  verification)
+- config.c gained a generic key-value store: every unknown
+  [section] key=value in led.conf is readable via conf_get_str /
+  conf_get_int, so a mod owns its own config section without config.c
+  knowing the key exists. Example section:
+      [ring]
+      test_sec=30        # test-rainbow hold in seconds
+  Verified live: test_sec=5 -> WINCH-test rainbows die after exactly 5s.
+- Rainbow cycler moved from ring.c into led.c (led_rainbow_reset/step/
+  rgb); ring.c only starts/stops it. No LED code outside led.c anymore.
+- build.cmd / apply.cmd track the new file list (chgd.c and mods/conf.c
+  removed; behavior byte-for-byte identical).
+
+## Revision: live status file for the GUI (2026-08-29)
+chgd now maintains /data/local/tmp/led_status (atomic tmp+rename, same
+pattern as led_chg) so an external GUI can show the current LED state
+without parsing logs:
+- ts / mode (charge|notify|ring) / band (lower/middle/upper/none) /
+  pkg (armed package or incoming.call/outgoing.call) / color=r,g,b /
+  type (0=off 1=breathing 2=flashing 3=static)
+- Written from the three LED-owner points only: apply_charge_leds
+  (charge.c), arm_notification (notify.c), arm_ring (mods/ring.c).
+  Disarm / ring end / screen-on all route back through
+  apply_charge_leds, so the file always mirrors reality.
+- ring.c gained g_cur_r/g_cur_g/g_cur_b so the status shows the actual
+  rainbow color instead of a placeholder.
+- No new files, no config schema change.
+
 ## Revision: full RGB colors, masks removed (2026-08-29)
 1. Colors are now RGB triplets (0-255 per channel) end to end instead of
    the bit masks (4=red, 2=green, 1=blue). Per-channel brightness is
@@ -81,7 +130,8 @@ now user-editable in a plain text file:
 `/data/adb/modules/led_hal_root/led.conf` (shipped with the module).
 Sections: [suppress] (one package per line - never lights the LED),
 [rules] (pkg=color-mask), [charge] (amber_at/green_at + breath ms),
-[notify] (breath ms + notif_max_sec).
+[notify] (shared behavior for ALL apps: breath ms + notif_max_sec;
+default_color applies only to apps without a [rules] entry).
 - New mods/conf.c parses it; runtime entries MERGE OVER the link-time
   registries (files win on conflicts, suppress adds). No recompile needed.
 - Lazy reload: conf_maybe_reload() stat()s the file and only re-reads when
@@ -214,10 +264,7 @@ Replaces the old polling script stack (worker.sh + listener.sh + chgd v1).
   kill -USR2 = disarm.
 
 ## Rebuild from source
-Run build.cmd (compiles core + mods/*.c into chgd). Point it at your NDK
-with `set NDK=path\to\android-ndk-r27d` (or `set NDK_CC=path\to\...
-\aarch64-linux-android29-clang.cmd`) before running. Single-file fallback
-for the archived monoliths is described in led_hal_root/README.txt.
+"D:\System\Apps\Android NDK\android-ndk-r27d\toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android29-clang.cmd" -O2 -s -Wall -Wno-comment -o chgd chgd.c
 
 ## Apply (device connected, adb root working)
 apply.cmd  — pushes module files, fixes perms, restarts the stack.
