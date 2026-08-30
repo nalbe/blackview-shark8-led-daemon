@@ -2,13 +2,17 @@
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -406,7 +410,7 @@ private inner class RgbPicker(label: String) : LinearLayout(context) {
         private var color = Triple(255, 0, 0)
         private var discrete = false          // breathing: 0 or 255 only
         private val swatch = View(context)
-        private val seekbars = mutableListOf<SeekBar>()
+        private val sliders = mutableListOf<SliderView>()
         private val valueTvs = mutableListOf<TextView>()
 
         init {
@@ -423,35 +427,23 @@ private inner class RgbPicker(label: String) : LinearLayout(context) {
             swatch.layoutParams = LayoutParams(dpi(22), dpi(22))
             val channels = listOf("R", "G", "B")
             channels.forEachIndexed { i, name ->
-                val sb = SeekBar(context)
-                sb.max = 255
-                sb.progress = intComponent(i)
-                styleSeekbar(sb, i)
                 val vt = text(intComponent(i).toString(), 13f, parse("#FFE0E0E0"), mono = true)
                 vt.layoutParams = LayoutParams(dpi(36), wP)
-                sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                        var p = progress
-                        if (discrete) {
-                            p = if (p < 128) 0 else 255
-                            if (p != seekBar.progress) {
-                                seekBar.progress = p
-                                return
-                            }
-                        }
-                        color = withComponent(i, p)
-                        valueTvs[i].text = p.toString()
-                        paintSwatch()
+                val sl = SliderView(channelColor(i), intComponent(i)) { v ->
+                    if (discrete) {
+                        val s = snap(v)
+                        sliders[i].progress = s
+                        color = withComponent(i, s)
+                    } else {
+                        color = withComponent(i, v)
                     }
-                    override fun onStartTrackingTouch(seekBar: SeekBar) {}
-                    override fun onStopTrackingTouch(seekBar: SeekBar) {}
-                })
-                seekbars.add(sb)
+                    valueTvs[i].text = colorOf(i).toString()
+                    paintSwatch()
+                }
+                sl.layoutParams = LayoutParams(0, dpi(50), 1f)
+                sliders.add(sl)
                 valueTvs.add(vt)
-                val r = row(text("$name", 13f, parse("#FF90CAF9"), bold = true), sb, vt)
-                (r.getChildAt(1).layoutParams as LayoutParams).weight = 1f
-                sb.layoutParams = LayoutParams(0, dpi(50), 1f)
-                addView(r)
+                addView(row(text("$name", 13f, parse("#FF90CAF9"), bold = true), sl, vt))
             }
             setPadding(0, dpi(3), 0, dpi(3))
             paintSwatch()
@@ -461,44 +453,21 @@ private inner class RgbPicker(label: String) : LinearLayout(context) {
          *  effect of the aw2033 chip can actually display. */
         private fun snap(v: Int): Int = if (v < 128) 0 else 255
 
+        private fun colorOf(i: Int): Int = when (i) {
+            0 -> color.first; 1 -> color.second; else -> color.third
+        }
+
         /** Breathing light type: channels can only be 0 or 255. */
         fun setDiscrete(on: Boolean) {
             discrete = on
             if (on) {
                 color = Triple(snap(color.first), snap(color.second), snap(color.third))
                 for (i in 0..2) {
-                    seekbars[i].progress = intComponent(i)
-                    valueTvs[i].text = intComponent(i).toString()
+                    sliders[i].progress = colorOf(i)
+                    valueTvs[i].text = colorOf(i).toString()
                 }
                 paintSwatch()
             }
-        }
-
-        /** Fat touch-friendly seekbar: 50dp hit zone, 14dp track, 22dp thumb. */
-        private fun styleSeekbar(sb: SeekBar, channel: Int) {
-            sb.minHeight = dpi(50)
-            sb.maxHeight = dpi(50)
-            val track = GradientDrawable()
-            track.shape = GradientDrawable.RECTANGLE
-            track.cornerRadius = dpf(7)
-            track.setColor(parse("#FF333A46"))
-            val fill = GradientDrawable()
-            fill.shape = GradientDrawable.RECTANGLE
-            fill.cornerRadius = dpf(7)
-            fill.setColor(channelColor(channel))
-            val lyr = LayerDrawable(arrayOf(track, fill))
-            lyr.setId(0, android.R.id.background)
-            lyr.setId(1, android.R.id.progress)
-            val inset = dpi(18)                 // (50 - 14) / 2
-            lyr.setLayerInset(0, 0, inset, 0, inset)
-            lyr.setLayerInset(1, 0, inset, 0, inset)
-            sb.progressDrawable = lyr
-            sb.splitTrack = false
-            val th = GradientDrawable()
-            th.shape = GradientDrawable.OVAL
-            th.setColor(parse("#FFF0F0F0"))
-            th.setSize(dpi(22), dpi(22))
-            sb.thumb = th
         }
 
         private fun channelColor(i: Int): Int = when (i) {
@@ -527,13 +496,83 @@ private inner class RgbPicker(label: String) : LinearLayout(context) {
                 Triple(snap(c.first), snap(c.second), snap(c.third))
             } else c
             for (i in 0..2) {
-                seekbars[i].progress = intComponent(i)
-                valueTvs[i].text = intComponent(i).toString()
+                sliders[i].progress = colorOf(i)
+                valueTvs[i].text = colorOf(i).toString()
             }
             paintSwatch()
         }
 
         fun getColor(): Triple<Int, Int, Int> = color
+    }
+
+    /** Minimal cheap slider: a single View drawn straight in onDraw (a
+     *  rounded track + fill + thumb). Far lighter than a SeekBar's stacked
+     *  drawables, so the Config page stays smooth at 120Hz. */
+    private inner class SliderView(
+        private val channelColor: Int,
+        initial: Int,
+        private val onMove: (Int) -> Unit
+    ) : View(context) {
+        var progress: Int = initial.coerceIn(0, 255)
+            set(v) {
+                field = v.coerceIn(0, 255)
+                invalidate()
+            }
+
+        private val trackPaint = Paint().apply { color = parse("#FF333A46"); isAntiAlias = true }
+        private val fillPaint = Paint().apply { color = channelColor; isAntiAlias = true }
+        private val thumbPaint = Paint().apply { color = parse("#FFF0F0F0"); isAntiAlias = true }
+        private var downProgress = -1
+
+        init {
+            setMinimumHeight(dpi(50))
+            setMinimumWidth(dpi(80))
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val t = dpi(6).toFloat()
+            val cy = height / 2f
+            val pad = dpi(14).toFloat()
+            val left = pad
+            val right = (width - pad).coerceAtLeast(left + 1f)
+            val range = right - left
+            val thumbX = left + range * (progress / 255f)
+            // track bg
+            canvas.drawRoundRect(RectF(left, cy - t / 2f, right, cy + t / 2f), t / 2f, t / 2f, trackPaint)
+            // fill up to thumb
+            canvas.drawRoundRect(RectF(left, cy - t / 2f, thumbX, cy + t / 2f), t / 2f, t / 2f, fillPaint)
+            // thumb
+            canvas.drawCircle(thumbX, cy, dpi(11).toFloat(), thumbPaint)
+        }
+
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    downProgress = progress
+                    updateFromX(e.x)
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> updateFromX(e.x)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    downProgress = -1
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            return true
+        }
+
+        private fun updateFromX(x: Float) {
+            val pad = dpi(14).toFloat()
+            val left = pad
+            val right = (width - pad).coerceAtLeast(left + 1f)
+            val v = ((x - left) / (right - left) * 255f)
+                .coerceIn(0f, 255f).toInt()
+            if (v != progress) {
+                progress = v
+                onMove(v)
+            }
+        }
     }
 
 // ---------------------------------------------------------------- helpers

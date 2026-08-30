@@ -1,5 +1,20 @@
 # led_hal_root patch notes (2026-08-23)
 
+## Revision: release v2.9 - GUI polish (2026-08-30)
+GUI (`led_gui/`) reworked, daemon untouched:
+1. Follow-the-finger swipe pager between the Status and Config tabs
+   (`PagerContainer` in MainActivity.kt). A mostly-horizontal drag flips
+   tabs and swallows the stream so the inner ScrollView can't fight it;
+   child views that claim the touch (sliders via requestDisallowIntercept
+   TouchEvent) win over the pager.
+2. RgbPicker's stock `SeekBar` replaced with a minimal hand-drawn
+   `SliderView` (rounded track + fill + thumb drawn straight in onDraw) -
+   far lighter than a SeekBar's stacked drawables, so the Config page
+   stays smooth on a 120Hz panel. Values + discrete (breathing) snap
+   behavior preserved.
+3. Prebuilt `led-gui.apk` rebuilt from the new sources; version bumped to
+   v2.9 / code 11.
+
 ## Revision: release v2.8 + LED GUI (2026-08-30)
 1. New companion app: `led_gui/` (Kotlin + Jetpack Compose,
    `com.bastet.ledgui`). A small root helper that reads the live status
