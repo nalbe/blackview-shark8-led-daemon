@@ -1,0 +1,19 @@
+# Gradle / Android build
+.gradle/
+build/
+local.properties
+*.apk
+
+# Kotlin
+.kotlin/
+
+# Temp / test binaries
+.tmp/
+
+# Build logs
+build_out.txt
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
