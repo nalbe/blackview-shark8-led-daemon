@@ -21,34 +21,11 @@ KernelSU module that drives the AW2033 RGB notification/charge LED on a rooted B
 
 All colors, thresholds, breathing timings and the suppress blacklist are user-editable in `led.conf` — no rebuild needed.
 
-## Configure
+## Configure — LED GUI app
 
-Edit `/data/adb/modules/led_hal_root/led_conf` on the device:
+The easiest way to configure everything is the **LED GUI** companion app (see below). It shows live LED status, lets you pick colors with sliders, toggle the daemon and keepalive, view logs, and run test hooks — all from the phone. Edits save directly to `led.conf` and apply on the fly, no daemon restart.
 
-```ini
-[suppress]
-com.android.systemui
-android
-
-[rules]
-org.telegram.messenger=255,0,255
-com.whatsapp=0,255,0
-
-[notify]
-default_color=255,255,255
-
-[charge]
-first_threshold=90
-second_threshold=95
-lower_range_color=255,0,0
-lower_range_light_type=1
-middle_range_color=96,255,0
-middle_range_light_type=2
-upper_range_color=0,255,0
-upper_range_light_type=3
-```
-
-Changes apply on the fly — no daemon restart.
+For power users who prefer the terminal, you can edit `/data/adb/modules/led_hal_root/led.conf` by hand — same effect.
 
 ## Architecture
 
@@ -103,9 +80,26 @@ kill -QUIT  $(pidof chgd)  # cycle charge bands
 kill -USR2  $(pidof chgd)  # disarm → back to charge
 ```
 
-## Companion app
+## LED GUI — companion app
 
-[LED GUI](https://github.com/nalbe/blackview-shark8-led-daemon) — Kotlin/Compose app that shows live LED status and lets you edit `led.conf` from the phone. Build with `install_gui.cmd` or grab the APK from [releases](https://github.com/nalbe/blackview-shark8-led-daemon/releases).
+The recommended way to use led_hal_root. A Kotlin/Android Views app (runs smooth at 120Hz on this firmware) with four swipeable tabs:
+
+- **Info** — root status, daemon PID, keepalive toggle, live LED color swatch (reads RGB brightness 4x/sec), test hooks (fake Telegram / Dialer / Rainbow / Charge cycle / Disarm), log tail with logging toggle
+- **Charge** — charge thresholds, per-range colors and light types (breathing / flashing / static), breath timings, soft-breath toggle
+- **Notification** — default notification color, breath timings, notif max duration, screen delay
+- **Call** — VoIP timeout, package list, ring test duration
+
+All changes save to `led.conf` and take effect on the next daemon event — no restart, no rebuild.
+
+### Install
+
+Download [`led-gui.apk`](https://github.com/nalbe/blackview-shark8-led-daemon/releases/latest) and sideload it, or build from source:
+
+```
+install_gui.cmd
+```
+
+Requires root (KernelSU). The app will request root on first launch.
 
 ## Release history
 
